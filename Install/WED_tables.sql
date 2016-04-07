@@ -16,7 +16,8 @@ CREATE TABLE WED_flow (
 CREATE TABLE WED_attr (
     aid     SERIAL NOT NULL,
     aname    TEXT NOT NULL,
-    adv   TEXT
+    adv   TEXT,
+    enabled BOOL NOT NULL DEFAULT TRUE
 );
 -- name must be unique 
 CREATE UNIQUE INDEX wed_attr_lower_name_idx ON WED_attr (lower(aname));

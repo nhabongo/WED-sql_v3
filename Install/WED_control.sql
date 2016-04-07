@@ -7,64 +7,66 @@
 ------------------------------------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION wed_attr_handler_aft() RETURNS TRIGGER AS 
 $wah$
-    #--plpy.info('Trigger "'+TD['name']+'" ('+TD['event']+','+TD['when']+') on "'+TD['table_name']+'"')
+    
+    def create_wedflow_trg():
+        plpy.execute('create trigger kernel_trigger instead of insert or update or delete on wedflow \
+                          for each row execute procedure kernel_function()')
+    
+    def update_wedflow_view():
+        wed_attr = plpy.execute('select aid,aname from wed_attr where enabled order by aid')
+        al = len(wed_attr)
+        if al == 0:
+            return al
+        elif al == 1:
+            plpy.execute('create view wedflow as select * from '+wed_attr[0]['aname'])
+            create_wedflow_trg()
+        else:
+            base_query = 'create or replace view wedflow as select * from '+wed_attr[0]['aname']+' full join '\
+                         +wed_attr[1]['aname']+' using(wid)'
+            for a in wed_attr[2:]:
+                base_query += ' full join '+a['aname']+' using(wid)'
+            plpy.execute(base_query)
+            
+        return al
+    
     if TD['event'] == 'INSERT':
         #--plpy.notice('Inserting new attribute: ' + TD['new']['name'])
+        query = 'CREATE TABLE %s (wid integer primary key, %s text default %s)' % \
+                (plpy.quote_ident(TD['new']['aname']),plpy.quote_ident(TD['new']['aname']),
+                (plpy.quote_literal(TD['new']['adv']) if TD['new']['adv'] else 'NULL'))
         try:
-            plpy.execute('ALTER TABLE wed_flow ADD COLUMN ' 
-                         + plpy.quote_ident(TD['new']['aname']) 
-                         + ' TEXT DEFAULT ' 
-                         + (plpy.quote_literal(TD['new']['adv']) if TD['new']['adv'] else 'NULL'))
-        except plpy.SPIError:
-            plpy.error('Could not insert new column at wed_flow')
-        else:
-            plpy.info('Column "'+TD['new']['aname']+'" inserted into wed_flow')
+            plpy.execute(query)
+            update_wedflow_view()
+        except plpy.SPIError as e:
+            plpy.error('Could not create new WED-attribute %s' % (TD['new']['aname']), e)
+        
+        
+        plpy.info('WED-attribute "'+TD['new']['aname']+'" inserted into wed_flow')
             
     elif TD['event'] == 'UPDATE':
-        if TD['new']['aname'] != TD['old']['aname']:
-            #--plpy.notice('Updating attribute name: ' + TD['old']['name'] + ' -> ' + TD['new']['name'])
-            try:
-                plpy.execute('ALTER TABLE wed_flow RENAME COLUMN ' 
-                             + plpy.quote_ident(TD['old']['aname']) 
-                             + ' TO ' 
-                             + plpy.quote_ident(TD['new']['aname']))
-            except plpy.SPIError:
-                plpy.error('Could not rename columns at wed_flow')
-            else:
-                plpy.info('Column name updated in wed_flow')
-            
-        if TD['new']['adv'] != TD['old']['adv']:
-            #--plpy.notice('Updating attribute '+TD['old']['name']+' default value :' 
-            #--            + TD['old']['default_value'] + ' -> ' + TD['new']['default_value'])
-            try:
-                plpy.execute('ALTER TABLE wed_flow ALTER COLUMN ' 
-                             + plpy.quote_ident(TD['new']['aname']) 
-                             + ' SET DEFAULT ' 
-                             + (plpy.quote_literal(TD['new']['adv']) if TD['new']['adv'] else 'NULL'))
-            except plpy.SPIError:
-                plpy.error('Could not modify columns at wed_flow')
-            else:
-                plpy.info('Column default value updated in wed_flow')
-    
+        plpy.error('WED-attributes cannot be modified. Try to remove it and insert a new one.')
+        
     #-- An attribute column can only be dropped if there aren't any pending transactions for all wed-states and it is not
     #--'referenced' by any predicate (cpred column in wed_trig table), otherwise an error should be raised.
-    #--elif TD['event'] == 'DELETE':
-    #--    try:
-    #--        plpy.execute('ALTER TABLE wed_flow DROP COLUMN '+ plpy.quote_ident(TD['old']['aname'])) 
-    #--    except plpy.SPIError:
-    #--        plpy.error('Could not remove column %s at wed_flow' %(TD['old'['aname']))
-    #--    else:
-    #--        plpy.info('Column %s removed from wed_flow' %(TD['old'['aname']))
+    elif TD['event'] == 'DELETE':
+        #--TODO: check if it is okay to remove the requested wed-attribute
+        try:
+            plpy.execute('drop view wedflow')
+            if update_wedflow_view() > 1:
+                create_wedflow_trg()
+            plpy.execute('drop table '+TD['old']['aname'])
         
+        except plpy.SPIError as e:
+            plpy.error('Could not remove WED-attribute %s' % (TD['old']['aname']), e)
+            
     else:
         plpy.error('UNDEFINED EVENT')
-        return None
-    return None    
+       
 $wah$ LANGUAGE plpython3u SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS wed_attr_trg_aft ON wed_attr;
 CREATE TRIGGER wed_attr_trg_aft
-AFTER INSERT OR UPDATE ON wed_attr
+AFTER INSERT OR UPDATE OR DELETE ON wed_attr
     FOR EACH ROW EXECUTE PROCEDURE wed_attr_handler_aft();
 
 --Insert a WED-flow modification into WED-trace (history)
@@ -321,9 +323,9 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
 $kt$ LANGUAGE plpython3u SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS kernel_trigger ON wed_flow;
-CREATE TRIGGER kernel_trigger
-AFTER INSERT OR UPDATE ON wed_flow
-    FOR EACH ROW EXECUTE PROCEDURE kernel_function();
+--CREATE TRIGGER kernel_trigger
+--AFTER INSERT OR UPDATE ON wed_flow
+--    FOR EACH ROW EXECUTE PROCEDURE kernel_function();
     
 
 ------------------------------------------------------------------------------------------------------------------------
