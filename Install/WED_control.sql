@@ -8,30 +8,32 @@
 CREATE OR REPLACE FUNCTION wed_attr_handler_aft() RETURNS TRIGGER AS 
 $wah$
     
-    def create_wedflow_trg():
-        plpy.execute('create trigger kernel_trigger instead of insert or update or delete on wedflow \
-                          for each row execute procedure kernel_function()')
-    
     def update_wedflow_view():
-        wed_attr = plpy.execute('select aid,aname from wed_attr where enabled order by aid')
+        wed_attr = plpy.execute('select aname from wed_attr where enabled order by aname')
+        plpy.execute('SET client_min_messages = error; drop view if exists wedf_low')
         al = len(wed_attr)
+
         if al == 0:
             return al
         elif al == 1:
-            plpy.execute('create view wedflow as select * from '+wed_attr[0]['aname'])
-            create_wedflow_trg()
+            plpy.execute('create view wed_flow as select * from '+wed_attr[0]['aname'])
         else:
-            base_query = 'create or replace view wedflow as select * from '+wed_attr[0]['aname']+' full join '\
+            base_query = 'create view wed_flow as select * from '+wed_attr[0]['aname']+' full join '\
                          +wed_attr[1]['aname']+' using(wid)'
             for a in wed_attr[2:]:
                 base_query += ' full join '+a['aname']+' using(wid)'
             plpy.execute(base_query)
-            
+        
+        plpy.execute('create trigger kernel_trigger instead of insert or update or delete on wed_flow \
+                          for each row execute procedure kernel_function()')
+        plpy.execute('SET client_min_messages = notice')
+        
         return al
     
     if TD['event'] == 'INSERT':
         #--plpy.notice('Inserting new attribute: ' + TD['new']['name'])
-        query = 'CREATE TABLE %s (wid integer primary key, %s text default %s)' % \
+        query = 'CREATE TABLE %s (wid integer primary key, %s text default %s, \
+                 FOREIGN KEY (wid) REFERENCES ST_STATUS (wid) ON DELETE RESTRICT)' % \
                 (plpy.quote_ident(TD['new']['aname']),plpy.quote_ident(TD['new']['aname']),
                 (plpy.quote_literal(TD['new']['adv']) if TD['new']['adv'] else 'NULL'))
         try:
@@ -40,24 +42,25 @@ $wah$
         except plpy.SPIError as e:
             plpy.error('Could not create new WED-attribute %s' % (TD['new']['aname']), e)
         
-        
         plpy.info('WED-attribute "'+TD['new']['aname']+'" inserted into wed_flow')
             
     elif TD['event'] == 'UPDATE':
-        plpy.error('WED-attributes cannot be modified. Try to remove it and insert a new one.')
+        for k in TD['old'].keys():
+            if (TD['new'][k] != TD['old'][k]) and (k != 'enabled'):
+                plpy.error('You can only disable an WED-attribute. Use SP attribute_toggle(aid)')
+        if TD['new']['enabled'] == TD['old']['enabled']:
+            plpy.error('WED-attribute already enabled/disabled')
+            
+        try:
+            update_wedflow_view()
+        except plpy.SPIError as e:
+            plpy.error('Could not enable/disable WED-attribute %s' % (TD['old']['aname']), e)
         
     #-- An attribute column can only be dropped if there aren't any pending transactions for all wed-states and it is not
     #--'referenced' by any predicate (cpred column in wed_trig table), otherwise an error should be raised.
     elif TD['event'] == 'DELETE':
+        plpy.error('You can only disable an WED-attribute. Use SP ...')
         #--TODO: check if it is okay to remove the requested wed-attribute
-        try:
-            plpy.execute('drop view wedflow')
-            if update_wedflow_view() > 1:
-                create_wedflow_trg()
-            plpy.execute('drop table '+TD['old']['aname'])
-        
-        except plpy.SPIError as e:
-            plpy.error('Could not remove WED-attribute %s' % (TD['old']['aname']), e)
             
     else:
         plpy.error('UNDEFINED EVENT')
@@ -322,7 +325,7 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
     #--(END) TRIGGER CODE ----------------------------------------------------------------------------------------------    
 $kt$ LANGUAGE plpython3u SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS kernel_trigger ON wed_flow;
+--DROP TRIGGER IF EXISTS kernel_trigger ON wed_flow;
 --CREATE TRIGGER kernel_trigger
 --AFTER INSERT OR UPDATE ON wed_flow
 --    FOR EACH ROW EXECUTE PROCEDURE kernel_function();

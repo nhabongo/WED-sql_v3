@@ -43,3 +43,4 @@ create SP to retrive the state of an instance given its wid (ST_STATUS table)
 re-run match algorithm in case of modifications on tables WED_attr or WED_trig
 create SP to enable/disable wed-attributes
 remove delete permission on wed_attr (non admin users)
+possible sql injection at wed_attr aname

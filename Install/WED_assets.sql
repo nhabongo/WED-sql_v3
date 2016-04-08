@@ -37,4 +37,18 @@ $$
 
 $$ LANGUAGE plpython3u;
 
+CREATE OR REPLACE FUNCTION attribute_toggle(aname text) RETURNS bool AS
+$$
+
+    try:
+        res = plpy.execute('update wed_attr set enabled = not enabled where aname=\''+aname+'\' returning enabled')
+    except plpy.SPIError as e:
+        plpy.error(e)
+    if res:
+        return res[0]['enabled']
+    else:
+        plpy.error('WED-attribute not found')
+
+
+$$ LANGUAGE plpython3u;
 --RESET ROLE; 

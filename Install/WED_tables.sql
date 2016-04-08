@@ -5,22 +5,23 @@ DROP TABLE IF EXISTS WED_trace;
 DROP TABLE IF EXISTS JOB_POOL;
 DROP TABLE IF EXISTS WED_trig;
 DROP TABLE IF EXISTS ST_STATUS;
-DROP TABLE IF EXISTS WED_flow CASCADE;
 
 -- An '*' means that WED-attributes columns will be added dynamicaly after an INSERT on WED-attr table
 --*WED-flow instances
-CREATE TABLE WED_flow (
-    wid     SERIAL PRIMARY KEY
-);
 
 CREATE TABLE WED_attr (
-    aid     SERIAL NOT NULL,
     aname    TEXT NOT NULL,
     adv   TEXT,
     enabled BOOL NOT NULL DEFAULT TRUE
 );
 -- name must be unique 
 CREATE UNIQUE INDEX wed_attr_lower_name_idx ON WED_attr (lower(aname));
+
+--Fast final WED-state detection(Running,Final,Exception)
+CREATE TABLE ST_STATUS (
+    wid     INTEGER PRIMARY KEY,
+    status  TEXT NOT NULL DEFAULT 'R'
+);
 
 CREATE TABLE WED_trig (
     tgid     SERIAL PRIMARY KEY,
@@ -45,16 +46,9 @@ CREATE TABLE JOB_POOL (
     timeout    INTERVAL NOT NULL,
     payload JSON NOT NULL,
     PRIMARY KEY (wid,tgid),
-    FOREIGN KEY (wid) REFERENCES WED_flow (wid) ON DELETE RESTRICT,
+    FOREIGN KEY (wid) REFERENCES ST_STATUS (wid) ON DELETE RESTRICT,
     FOREIGN KEY (tgid) REFERENCES WED_trig (tgid) ON DELETE RESTRICT
 );     
-
---Fast final WED-state detection(Running,Final,Exception)
-CREATE TABLE ST_STATUS (
-    wid     INTEGER PRIMARY KEY,
-    status  TEXT NOT NULL DEFAULT 'R',
-    FOREIGN KEY (wid) REFERENCES WED_flow (wid) ON DELETE CASCADE
-);
 
 --*WED-trace keeps the execution history for all instances
 CREATE TABLE WED_trace (
@@ -64,5 +58,5 @@ CREATE TABLE WED_trace (
     status    TEXT NOT NULL DEFAULT 'R',
     tstmp      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     state      JSON NOT NULL,
-    FOREIGN KEY (wid) REFERENCES WED_flow (wid) ON DELETE CASCADE
+    FOREIGN KEY (wid) REFERENCES ST_STATUS (wid) ON DELETE RESTRICT
 );
