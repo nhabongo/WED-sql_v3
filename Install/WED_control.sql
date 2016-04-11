@@ -5,30 +5,8 @@
 --SET ROLE wed_admin;
 --Insert (or modify) a new WED-atribute in the apropriate tables 
 ------------------------------------------------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION wed_attr_handler_aft() RETURNS TRIGGER AS 
+CREATE OR REPLACE FUNCTION wed_attr_handler() RETURNS TRIGGER AS 
 $wah$
-    
-    def update_wedflow_view():
-        wed_attr = plpy.execute('select aname from wed_attr where enabled order by aname')
-        plpy.execute('SET client_min_messages = error; drop view if exists wedf_low')
-        al = len(wed_attr)
-
-        if al == 0:
-            return al
-        elif al == 1:
-            plpy.execute('create view wed_flow as select * from '+wed_attr[0]['aname'])
-        else:
-            base_query = 'create view wed_flow as select * from '+wed_attr[0]['aname']+' full join '\
-                         +wed_attr[1]['aname']+' using(wid)'
-            for a in wed_attr[2:]:
-                base_query += ' full join '+a['aname']+' using(wid)'
-            plpy.execute(base_query)
-        
-        plpy.execute('create trigger kernel_trigger instead of insert or update or delete on wed_flow \
-                          for each row execute procedure kernel_function()')
-        plpy.execute('SET client_min_messages = notice')
-        
-        return al
     
     if TD['event'] == 'INSERT':
         #--plpy.notice('Inserting new attribute: ' + TD['new']['name'])
@@ -38,11 +16,11 @@ $wah$
                 (plpy.quote_literal(TD['new']['adv']) if TD['new']['adv'] else 'NULL'))
         try:
             plpy.execute(query)
-            update_wedflow_view()
         except plpy.SPIError as e:
             plpy.error('Could not create new WED-attribute %s' % (TD['new']['aname']), e)
         
-        plpy.info('WED-attribute "'+TD['new']['aname']+'" inserted into wed_flow')
+        #--plpy.info('WED-attribute "'+TD['new']['aname']+'" inserted into wed_flow')
+        return 'OK'
             
     elif TD['event'] == 'UPDATE':
         for k in TD['old'].keys():
@@ -50,11 +28,9 @@ $wah$
                 plpy.error('You can only disable an WED-attribute. Use SP attribute_toggle(aid)')
         if TD['new']['enabled'] == TD['old']['enabled']:
             plpy.error('WED-attribute already enabled/disabled')
-            
-        try:
-            update_wedflow_view()
-        except plpy.SPIError as e:
-            plpy.error('Could not enable/disable WED-attribute %s' % (TD['old']['aname']), e)
+        
+        return 'OK'            
+       
         
     #-- An attribute column can only be dropped if there aren't any pending transactions for all wed-states and it is not
     #--'referenced' by any predicate (cpred column in wed_trig table), otherwise an error should be raised.
@@ -67,10 +43,49 @@ $wah$
        
 $wah$ LANGUAGE plpython3u SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS wed_attr_trg_aft ON wed_attr;
-CREATE TRIGGER wed_attr_trg_aft
+CREATE OR REPLACE FUNCTION update_wedflow_view() RETURNS TRIGGER AS
+$uw$
+    plpy.info('updating view "wed_flow" ...')
+    try:
+        wed_attr = plpy.execute('select aname from wed_attr where enabled order by aname')
+        plpy.execute('SET client_min_messages = error; drop view if exists wed_flow')
+    except plpy.SPIError as e:
+        plpy.error('Could not update "wed_flow" view : %s' % (e))
+    al = len(wed_attr)
+
+    if al == 0:
+        return None
+    elif al == 1:
+        try:
+            plpy.execute('create view wed_flow as select * from '+wed_attr[0]['aname'])
+        except plpy.SPIError as e:
+            plpy.error(e)
+    else:
+        base_query = 'create view wed_flow as select * from '+wed_attr[0]['aname']+' full join '\
+                     +wed_attr[1]['aname']+' using(wid)'
+        for a in wed_attr[2:]:
+            base_query += ' full join '+a['aname']+' using(wid)'
+        try:
+            plpy.execute(base_query)
+        except plpy.SPIError as e:
+            plpy.error(e)
+    try:
+        plpy.execute('create trigger kernel_trigger instead of insert or update or delete on wed_flow \
+                      for each row execute procedure kernel_function()')
+        plpy.execute('SET client_min_messages = notice')
+    except plpy.SPIError as e:
+            plpy.error(e)
+
+$uw$ LANGUAGE plpython3u SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS wed_attr_trg_a ON wed_attr;
+DROP TRIGGER IF EXISTS wed_attr_trg_b ON wed_attr;
+CREATE TRIGGER wed_attr_trg_a
+BEFORE INSERT OR UPDATE OR DELETE ON wed_attr
+    FOR EACH ROW EXECUTE PROCEDURE wed_attr_handler();
+CREATE TRIGGER wed_attr_trg_b
 AFTER INSERT OR UPDATE OR DELETE ON wed_attr
-    FOR EACH ROW EXECUTE PROCEDURE wed_attr_handler_aft();
+    FOR EACH ROW EXECUTE PROCEDURE update_wedflow_view();
 
 --Insert a WED-flow modification into WED-trace (history)
 ------------------------------------------------------------------------------------------------------------------------
@@ -257,6 +272,23 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
     
     #-- New wed-flow instance (AFTER INSERT)----------------------------------------------------------------------------
     if TD['event'] in ['INSERT']:
+        #--First insert WED-attribute values in their respective tables ------------------------------------------------
+        try:
+            res = plpy.execute('select nextval(\'widseq\')')
+        except plpy.SPIError as e:
+            plpy.error(e)
+        wid = str(res[0]['nextval'])
+        plpy.info(wid)
+        for attr in TD['new'].keys():
+            if attr != 'wid':
+                plpy.info(attr)
+                try:
+                    plpy.execute('insert into '+attr+' values ('+wid+','+('\''+TD['new'][attr]+'\'' if TD['new'][attr] else 'DEFAULT')+')')
+                except plpy.SPIError as e:
+                    plpy.error(e)
+        #---------------------------------------------------------------------------------------------------------------
+        
+        #--Then start WED-SQL main algorithm----------------------------------------------------------------------------
         
         trmatched = pred_match()
         
@@ -281,6 +313,19 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
     #-- Updating an WED-state ------------------------------------------------------------------------------------------
     elif TD['event'] in ['UPDATE']:
         
+        #--First update each WED-attribute table -----------------------------------------------------------------------
+        if TD['old']['wid'] != TD['new']['wid']:
+            plpy.error('Cannot change WED-flow id !')
+        for attr in TD['new'].keys():
+            if attr != 'wid':
+                if TD['new'][attr] != TD['old'][attr]:
+                    try:
+                        plpy.execute('update '+attr+' set '+attr+'=\''+TD['new'][attr]+'\' where wid='+str(TD['old']['wid']))
+                    except plpy.SPIError as e:
+                        plpy.error(e)
+        #---------------------------------------------------------------------------------------------------------------
+
+        #--Then start WED-SQL main algorithm----------------------------------------------------------------------------
         status = get_st_status()
         
         if status == 'F':

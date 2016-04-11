@@ -5,6 +5,9 @@ DROP TABLE IF EXISTS WED_trace;
 DROP TABLE IF EXISTS JOB_POOL;
 DROP TABLE IF EXISTS WED_trig;
 DROP TABLE IF EXISTS ST_STATUS;
+DROP SEQUENCE IF EXISTS widseq;
+
+CREATE SEQUENCE widseq;
 
 -- An '*' means that WED-attributes columns will be added dynamicaly after an INSERT on WED-attr table
 --*WED-flow instances
