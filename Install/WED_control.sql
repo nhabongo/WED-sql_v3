@@ -179,7 +179,7 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
     #-- Create a new entry on ST_STATUS for fast detecting final states ------------------------------------------------
     def new_st_status_entry():
         try:
-            plpy.execute('INSERT INTO st_status (wid) VALUES (' + str(TD['new']['wid']) + ')')
+            plpy.execute('INSERT INTO st_status (wid) VALUES (' +str(TD['new']['wid'])+ ')')
         except plpy.SPIError as e:
             plpy.info('Could not insert new entry into st_status')
             plpy.error(e)    
@@ -277,19 +277,18 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
             res = plpy.execute('select nextval(\'widseq\')')
         except plpy.SPIError as e:
             plpy.error(e)
-        wid = str(res[0]['nextval'])
-        plpy.info(wid)
+        wid = res[0]['nextval']
+        TD['new']['wid'] = wid
+        new_st_status_entry()
         for attr in TD['new'].keys():
             if attr != 'wid':
-                plpy.info(attr)
                 try:
-                    plpy.execute('insert into '+attr+' values ('+wid+','+('\''+TD['new'][attr]+'\'' if TD['new'][attr] else 'DEFAULT')+')')
+                    plpy.execute('insert into '+attr+' values ('+str(wid)+','+('\''+TD['new'][attr]+'\'' if TD['new'][attr] else 'DEFAULT')+')')
                 except plpy.SPIError as e:
                     plpy.error(e)
         #---------------------------------------------------------------------------------------------------------------
         
         #--Then start WED-SQL main algorithm----------------------------------------------------------------------------
-        
         trmatched = pred_match()
         
         if (not trmatched):
@@ -301,8 +300,6 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
             status = 'R'
         
         trfired = squeeze_all_triggers(trmatched)
-        new_st_status_entry()
-        
         new_trace_entry('_INIT',trfired,status)
         set_st_status(status)
         
@@ -326,6 +323,7 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
         #---------------------------------------------------------------------------------------------------------------
 
         #--Then start WED-SQL main algorithm----------------------------------------------------------------------------
+        
         status = get_st_status()
         
         if status == 'F':
@@ -343,9 +341,9 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
         
         #--validations and match
         trmatched = pred_match()
+        plpy.info(trmatched)
         remove_job(job[0],job[1])
         trfired = squeeze_all_triggers(trmatched)
-        
         
         final = is_final(trmatched)
         pj = check_for_pending_jobs()
