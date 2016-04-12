@@ -144,11 +144,12 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
         wid = TD['new']['wid']
         payload = json_wed_state()
         
-        plan = plpy.prepare('insert into job_pool (wid,tgid,trname,timeout,payload) values ($1,$2,$3,$4,$5)',['integer','integer','text','interval','json'])
+        #--plan = plpy.prepare('insert into job_pool (wid,tgid,trname,timeout,payload) values ($1,$2,$3,$4,$5)',['integer','integer','text','interval','json'])
         
         for trname,tgid,timeout in trmatched:
             try:
-                plpy.execute(plan,[wid,tgid,trname,timeout,payload])
+                plpy.execute('insert into job_pool (wid,tgid,trname,timeout,payload) values (%d,%d,%s,$s::interval,$s::json)' %\
+                             (wid,tgid,trname,timeout,payload))
             except spiexceptions.UniqueViolation:
                 #--plpy.info('UNIQUE VIOLAtioN: JOB_POOL')
                 pass
@@ -245,7 +246,9 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
     #-- Set an WED-state status (final or not final)
     def set_st_status(status='R'):
         try:
-            res = plpy.execute('update st_status set status=\''+status+'\' where wid='+str(TD['new']['wid']))
+            res = plpy.execute('update st_status set status=\''+status+'\' where wid='+str(TD['new']['wid'])+
+                               ' and not exists(select 1 from st_status where wid='+str(TD['new']['wid'])+' and \
+                               status=\''+status+'\')')
         except plpy.SPIError:
             plpy.error('Status set error on st_status table')
 
@@ -343,6 +346,7 @@ CREATE OR REPLACE FUNCTION kernel_function() RETURNS TRIGGER AS $kt$
         trmatched = pred_match()
         plpy.info(trmatched)
         remove_job(job[0],job[1])
+
         trfired = squeeze_all_triggers(trmatched)
         
         final = is_final(trmatched)

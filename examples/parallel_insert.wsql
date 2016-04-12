@@ -1,0 +1,9 @@
+BEGIN;
+
+INSERT INTO wed_attr (aname) values ('a2'),('a3');
+
+INSERT INTO wed_trig (tgname,trname,cname,cpred,timeout) values ('t1','tr_a2','c1', $$(a2 = 'a' and a3 <> 'b')$$,'3d18h');
+INSERT INTO wed_trig (tgname,trname,cname,cpred,timeout) values ('t2','tr_a3','c2', $$(a3 = 'a' and a2 <> 'b')$$,'03:00:30');
+INSERT INTO wed_trig (cpred,cfinal) values ($$(a2 is not null) and (a3 = 'b' and a2 = 'b')$$, True);
+
+COMMIT;
